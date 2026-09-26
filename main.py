@@ -128,6 +128,7 @@ async def process_message_event(event: MessageEvent):
                 reply_text = "ขออภัยครับ Jarvis ไม่สามารถประมวลผลข้อความนี้ได้ในขณะนี้"
 
         # 3. Reply back to LINE
+        logger.info(f"Attempting to reply to {session_id} with token {reply_token[:10]}... (response length: {len(reply_text)})")
         try:
             line_bot_api.reply_message(
                 ReplyMessageRequest(

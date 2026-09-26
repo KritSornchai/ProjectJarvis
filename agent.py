@@ -113,6 +113,7 @@ class AgentManager:
                         )
                     )
                     reply_text = response.text.strip() if response.text else "รับทราบครับ"
+                    logger.info(f"Gemini (with search) succeeded: {reply_text[:60]}")
                     self._save_history(session_id, current_request_contents, reply_text)
                     return reply_text
                 except Exception as e:
@@ -128,9 +129,11 @@ class AgentManager:
                     config=types.GenerateContentConfig(
                         system_instruction=system_instruction,
                         temperature=0.7,
+                        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
                     )
                 )
                 reply_text = response.text.strip() if response.text else "รับทราบครับ"
+                logger.info(f"Gemini standard mode succeeded: {reply_text[:60]}")
                 self._save_history(session_id, current_request_contents, reply_text)
                 return reply_text
             except Exception as e:
