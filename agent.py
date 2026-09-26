@@ -1,17 +1,33 @@
 import os
 import logging
 from typing import Dict, List
+from datetime import datetime, timezone, timedelta
 from google import genai
 from google.genai import types
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SYSTEM_INSTRUCTION = """คุณคือ Jarvis (จาร์วิส) AI ผู้ช่วยส่วนตัวอัจฉริยะของผู้ใช้
+def get_system_instruction() -> str:
+    """Returns dynamic system instruction with real-time Bangkok date and time context"""
+    tz_bkk = timezone(timedelta(hours=7))
+    now = datetime.now(tz_bkk)
+    thai_year = now.year + 543
+    date_str = now.strftime(f"%d/%m/{thai_year} (ค.ศ. %Y) เวลา %H:%M น.")
+
+    return f"""คุณคือ Jarvis (จาร์วิส) AI ผู้ช่วยส่วนตัวอัจฉริยะของผู้ใช้
+วันเวลาปัจจุบันในประเทศไทยคือ: {date_str}
+
 บทบาทและลักษณะนิสัย:
 - สุภาพ ฉลาด คล่องแคล่ว เป็นมิตร และพร้อมช่วยเหลือในทุกเรื่อง
 - ตอบคำถามอย่างกระชับ ตรงประเด็น เข้าใจง่าย และใช้ภาษาไทยอย่างเป็นธรรมชาติ
 - จดจำบริบทการสนทนาและช่วยคิด วิเคราะห์ วางแผนงาน หรือให้คำปรึกษาได้ดี
-- หากข้อความยาวเกินไป ให้จัดเป็นข้อย่อย (bullet points) เพื่อให้อ่านใน LINE ได้สะดวกสบาย
+- หากข้อความยาว ให้จัดเป็นข้อย่อย (bullet points) เพื่อให้อ่านใน LINE ได้สะดวกสบาย
+
+ความสามารถในการสืบค้นข้อมูลข่าวสาร (Real-time Google Search):
+- คุณมีเครื่องมือค้นหาข้อมูลบน Google Search เพื่อเข้าถึงข้อมูลล่าสุด ข่าวสาร สภาพอากาศ หรือเหตุการณ์ปัจจุบัน
+- เมื่อผู้ใช้ถามเรื่องข่าวสาร สถานการณ์ล่าสุด หรือข้อมูลเจาะจง ให้ใช้ Google Search เสมอ
+- หากผู้ใช้ถามถึงวันที่หรือปีที่ยังมาไม่ถึง (อนาคต) ให้แจ้งอย่างสุภาพว่ายังมาไม่ถึง และยังไม่มีข้อมูลเหตุการณ์จริง
+- หากผู้ใช้ไม่ระบุปี ให้เทียบกับวันเวลาปัจจุบันหรือถามเพื่อความแน่ใจอย่างสุภาพ
 
 กฎภาษาและการตอบ:
 - ถ้าผู้ใช้ถามเป็นภาษาอังกฤษ ให้ตอบเป็นภาษาอังกฤษอย่างคล่องแคล่ว
@@ -20,8 +36,7 @@ DEFAULT_SYSTEM_INSTRUCTION = """คุณคือ Jarvis (จาร์วิส
 - ปรับน้ำเสียงให้ดูเหมือน Jarvis จาก Iron Man ที่มีความจงรักภักดีและเฉลียวฉลาด
 """
 
-
-# Free tier models with high quota limits
+# Free tier models supporting tools and high quotas
 DEFAULT_MODEL_FALLBACKS = [
     "gemini-2.5-flash-lite",
     "gemini-3.5-flash-lite",
@@ -34,7 +49,7 @@ class AgentManager:
     def __init__(self, api_key: str, primary_model: str = "gemini-2.5-flash-lite", model_name: str = None):
         self.api_key = api_key
         self.client = genai.Client(api_key=api_key)
-        
+
         chosen_primary = model_name or primary_model or "gemini-2.5-flash-lite"
         models = [chosen_primary]
         for m in DEFAULT_MODEL_FALLBACKS:
@@ -42,9 +57,7 @@ class AgentManager:
                 models.append(m)
         self.models = models
 
-        # Store conversation history: session_id -> list of types.Content
         self.histories: Dict[str, List[types.Content]] = {}
-        # Maximum turns to retain per session
         self.max_history_turns = 20
 
     def reset_memory(self, session_id: str):
@@ -53,7 +66,7 @@ class AgentManager:
             del self.histories[session_id]
 
     async def get_response(self, user_id: str, message_text: str) -> str:
-        """Process incoming user message and return response with automatic model fallback"""
+        """Process incoming user message and return response with Google Search & model fallback"""
         session_id = user_id
 
         # Command to reset memory
@@ -72,30 +85,31 @@ class AgentManager:
         current_request_contents = history + [user_content]
 
         last_error = None
+        system_instruction = get_system_instruction()
 
         # Try models in priority order with fallback
         for model_name in self.models:
             try:
-                logger.info(f"Calling Gemini with model: {model_name} for session {session_id}")
+                logger.info(f"Calling Gemini ({model_name}) with Google Search for session {session_id}")
                 response = self.client.models.generate_content(
                     model=model_name,
                     contents=current_request_contents,
                     config=types.GenerateContentConfig(
-                        system_instruction=DEFAULT_SYSTEM_INSTRUCTION,
+                        system_instruction=system_instruction,
+                        tools=[types.Tool(google_search=types.GoogleSearch())],
                         temperature=0.7,
                     )
                 )
 
                 reply_text = response.text.strip() if response.text else "รับทราบครับ"
 
-                # Update history with user message and model response
+                # Update history
                 model_content = types.Content(
                     role="model",
                     parts=[types.Part.from_text(text=reply_text)]
                 )
                 new_history = current_request_contents + [model_content]
 
-                # Keep only last max_history_turns * 2 items
                 if len(new_history) > self.max_history_turns * 2:
                     new_history = new_history[-(self.max_history_turns * 2):]
 
@@ -104,10 +118,9 @@ class AgentManager:
 
             except Exception as e:
                 err_str = str(e)
-                logger.warning(f"Model {model_name} failed: {err_str[:200]}. Trying next fallback model...")
+                logger.warning(f"Model {model_name} with search failed: {err_str[:200]}. Trying next fallback...")
                 last_error = e
                 continue
 
-        # If all models fail
         logger.error(f"All Gemini models exhausted. Last error: {last_error}")
-        return "ขออภัยครับ ตอนนี้โควตาการประมวลผลของระบบเต็มชั่วคราว กรุณารอสักครู่แล้วส่งข้อความใหม่อีกครั้งครับ"
+        return "ขออภัยครับ ตอนนี้ระบบการสืบค้นข้อมูลมีผู้ใช้งานจำนวนมาก กรุณารอสักครู่แล้วลองส่งข้อความใหม่อีกครั้งครับ"
