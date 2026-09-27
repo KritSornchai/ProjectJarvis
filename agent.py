@@ -1,10 +1,11 @@
+from profile_manager import profile_manager
 import os
 import re
 import logging
 import urllib.request
 import urllib.parse
 from html import unescape
-from typing import Dict, List
+from typing import Dict, List, Optional
 from datetime import datetime, timezone, timedelta
 from google import genai
 from google.genai import types
@@ -42,14 +43,14 @@ def perform_web_search(query: str, max_results: int = 5) -> str:
         logger.info(f"Web search skipped/timed out: {e}. Falling back to internal Gemini intelligence.")
     return ""
 
-def get_system_instruction() -> str:
+def get_system_instruction(user_id: Optional[str] = None) -> str:
     """Returns dynamic system instruction with real-time Bangkok date and time context"""
     tz_bkk = timezone(timedelta(hours=7))
     now = datetime.now(tz_bkk)
     thai_year = now.year + 543
     date_str = now.strftime(f"%d/%m/{thai_year} (ค.ศ. %Y) เวลา %H:%M น.")
 
-    return f"""คุณคือ Jarvis (จาร์วิส) AI ผู้ช่วยส่วนตัวอัจฉริยะของผู้ใช้
+    prompt = f"""คุณคือ Jarvis (จาร์วิส) AI ผู้ช่วยส่วนตัวอัจฉริยะของผู้ใช้
 วันเวลาปัจจุบันในประเทศไทยคือ: {date_str}
 
 
@@ -75,6 +76,11 @@ def get_system_instruction() -> str:
 - ตอบด้วยความมั่นใจ หากเรื่องใดไม่แน่ใจให้แจ้งตามตรงและแนะนำแนวทางตรวจสอบเพิ่มเติม
 - ปรับน้ำเสียงให้ดูเหมือน Jarvis จาก Iron Man ที่มีความจงรักภักดีและเฉลียวฉลาด
 """
+    if user_id:
+        profile_context = profile_manager.get_context_for_prompt(user_id)
+        prompt += f"\n{profile_context}\n"
+
+    return prompt
 
 DEFAULT_MODEL_FALLBACKS = [
     "gemini-3.5-flash-lite",   # 500 requests / day!
@@ -113,9 +119,26 @@ class AgentManager:
             self.reset_memory(session_id)
             return "กระผมได้รีเซ็ตความทรงจำบทสนทนาเรียบร้อยแล้วครับ มีอะไรให้ Jarvis รับใช้เพิ่มเติมไหมครับ?"
 
+        # Check for profile & cross-device quick commands (passcode linking, profile view)
+        quick_reply = profile_manager.handle_quick_commands(session_id, message_text)
+        if quick_reply:
+            return quick_reply
+
+        # Check if user asks to remember new facts/routines
+        clean_msg = message_text.strip()
+        if any(w in clean_msg for w in ["ช่วยจำว่า", "จำว่าผม", "บันทึกว่าผม", "จำไว้ว่า"]):
+            extracted = re.sub(r"^(ช่วย)?(จำ|บันทึก)(ว่า|ไว้ว่า)?(ผม|ฉัน)?", "", clean_msg).strip()
+            if extracted:
+                profile_manager.add_note(session_id, extracted)
+                if any(k in extracted for k in ["กินยา", "ทานยา"]):
+                    if "เย็น" in extracted or "ค่ำ" in extracted:
+                        profile_manager.update_routine(session_id, "evening", f"อย่าลืม{extracted}ครับ")
+                    elif "เช้า" in extracted:
+                        profile_manager.update_routine(session_id, "morning", f"อย่าลืม{extracted}ครับ")
+
         history = self.histories.get(session_id, [])
 
-        system_instruction = get_system_instruction()
+        system_instruction = get_system_instruction(user_id=session_id)
 
         # Check if real-time web search should be performed
         if needs_search(message_text):

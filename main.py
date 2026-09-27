@@ -1,3 +1,5 @@
+from profile_manager import profile_manager, get_time_period
+from typing import Optional
 import os
 import sys
 import logging
@@ -15,6 +17,7 @@ from linebot.v3.messaging import (
     ReplyMessageRequest,
     TextMessage,
     ShowLoadingAnimationRequest,
+    PushMessageRequest,
 )
 
 from agent import AgentManager
@@ -54,7 +57,50 @@ def read_root():
     return {
         "status": "online",
         "agent": "Jarvis",
-        "webhook_endpoint": "/callback"
+        "webhook_endpoint": "/callback",
+        "reminder_endpoint": "/api/cron/reminder"
+    }
+
+@app.get("/api/cron/reminder")
+@app.post("/api/cron/reminder")
+async def scheduled_reminder(period: Optional[str] = None):
+    """
+    Endpoint for external cron job (e.g. cron-job.org or UptimeRobot)
+    to trigger proactive routine reminders into users' LINE chats.
+    """
+    current_period, period_desc = get_time_period()
+    target_period = period or current_period
+
+    recipients = profile_manager.get_proactive_push_recipients(target_period)
+    if not recipients:
+        return {"status": "ok", "message": f"No active routine reminders for period: {target_period}", "pushed_count": 0}
+
+    pushed_count = 0
+    with ApiClient(line_configuration) as api_client:
+        line_bot_api = MessagingApi(api_client)
+        for line_user_id, name, routine in recipients:
+            push_text = (
+                f"สวัสดี{period_desc}ครับ {name}!\n"
+                f"กระผม Jarvis ขออนุญาตแจ้งเตือนตามกิจวัตรประจำวันของท่านครับ:\n\n"
+                f"🔔 {routine}\n\n"
+                f"ขอให้ท่านมีความสุขและสุขภาพแข็งแรงเสมอครับ มีเรื่องไหนให้กระผมรับใช้เพิ่มเติม สั่งการมาได้เลยนะครับ!"
+            )
+            try:
+                line_bot_api.push_message(
+                    PushMessageRequest(
+                        to=line_user_id,
+                        messages=[TextMessage(text=push_text)]
+                    )
+                )
+                pushed_count += 1
+                logger.info(f"Proactive reminder pushed to {name} ({line_user_id}) for {target_period}")
+            except Exception as e:
+                logger.error(f"Failed to push proactive reminder to {line_user_id}: {e}")
+
+    return {
+        "status": "ok",
+        "period": target_period,
+        "pushed_count": pushed_count
     }
 
 import re
