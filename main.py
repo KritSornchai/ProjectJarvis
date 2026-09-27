@@ -1,4 +1,4 @@
-from profile_manager import profile_manager, get_time_period
+from user_storage import user_storage, get_time_period
 from typing import Optional
 import os
 import sys
@@ -71,7 +71,7 @@ async def scheduled_reminder(period: Optional[str] = None):
     current_period, period_desc = get_time_period()
     target_period = period or current_period
 
-    recipients = profile_manager.get_proactive_push_recipients(target_period)
+    recipients = user_storage.get_proactive_push_recipients(target_period)
     if not recipients:
         return {"status": "ok", "message": f"No active routine reminders for period: {target_period}", "pushed_count": 0}
 
@@ -151,6 +151,15 @@ async def process_message_event(event: MessageEvent):
     with ApiClient(line_configuration) as api_client:
         line_bot_api = MessagingApi(api_client)
 
+        # Automatically fetch user display name from LINE OA on interaction
+        display_name = None
+        if user_id and user_id != "unknown":
+            try:
+                profile = line_bot_api.get_profile(user_id)
+                display_name = getattr(profile, "display_name", None)
+            except Exception as e:
+                logger.debug(f"Could not fetch LINE profile for {user_id}: {e}")
+
         # 1. Show loading animation only in 1-on-1 chats (LINE does not support it for group chats)
         if source_type == "user":
             try:
@@ -163,12 +172,12 @@ async def process_message_event(event: MessageEvent):
             except Exception as e:
                 logger.warning(f"Could not trigger loading animation: {e}")
 
-        # 2. Get AI Agent response
+        # 2. Get AI Agent response with isolated user profile & display name
         if agent is None:
             reply_text = "ขออภัยครับ ยังไม่ได้ตั้งค่า GEMINI_API_KEY ในระบบ กรุณาตรวจสอบไฟล์ .env ครับ"
         else:
             try:
-                reply_text = await agent.get_response(user_id=session_id, message_text=prompt_text)
+                reply_text = await agent.get_response(user_id=session_id, message_text=prompt_text, display_name=display_name)
             except Exception as e:
                 logger.error(f"Error generating AI response: {e}")
                 reply_text = "ขออภัยครับ Jarvis ไม่สามารถประมวลผลข้อความนี้ได้ในขณะนี้"
