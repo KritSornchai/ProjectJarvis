@@ -128,3 +128,19 @@ graph TD
   2. **สิ่งที่ผู้ใช้สั่งให้จำ / Action Items**
   3. **คำแนะนำเพิ่มเติมจาก Jarvis**
 - **ความปลอดภัย:** ข้อมูลของผู้ใช้อื่นจะไม่ถูกนำมาปะปนในบริบทการสรุปโดยเด็ดขาด
+
+---
+
+## 5. การยกระดับสู่ Enterprise Cloud Database: MongoDB Atlas (ฟรีตลอดชีพ 512MB)
+
+เพื่อแก้ปัญหา Ephemeral Filesystem บน Render (ข้อมูลถูกรีเซ็ตเมื่อมี Deploy ใหม่) ระบบรองรับ **Dual-Mode Storage**:
+1. **เมื่อมี `MONGODB_URI` ใน Environment Variables:**
+   - ระบบจะสลับไปบันทึกและอ่านข้อมูลจาก **MongoDB Atlas Cloud Database** อัตโนมัติ (ถาวร 100% ตลอดชีพ ไม่ว่าจะ Redeploy กี่ครั้งข้อมูลก็อยู่ครบ)
+   - มีระบบ Auto-Migration: อัปโหลดข้อมูลจากไฟล์ JSON เดิมขึ้น Cloud ให้ทันทีที่เชื่อมต่อครั้งแรก
+2. **เมื่อไม่มี `MONGODB_URI` (หรือเชื่อมต่อไม่สำเร็จ):**
+   - ระบบจะ Fallback กลับมาใช้ Local JSON Files ใน `data/users/` อัตโนมัติ ทำให้รันได้ทั้งบน Local และ Cloud แบบ Zero Downtime
+
+### ตัวแปรสภาพแวดล้อมที่ต้องเพิ่มบน Render:
+```text
+MONGODB_URI=mongodb+srv://<username>:<password>@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority
+```
