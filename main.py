@@ -2,7 +2,7 @@ import os
 import sys
 import logging
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 
 from linebot.v3 import WebhookParser
@@ -141,7 +141,7 @@ async def process_message_event(event: MessageEvent):
             logger.error(f"Error replying message: {e}")
 
 @app.post("/callback")
-async def callback(request: Request, background_tasks: BackgroundTasks):
+async def callback(request: Request):
     signature = request.headers.get("X-Line-Signature", "")
     body = (await request.body()).decode("utf-8")
 
@@ -156,7 +156,7 @@ async def callback(request: Request, background_tasks: BackgroundTasks):
 
     for event in events:
         if isinstance(event, MessageEvent) and isinstance(event.message, TextMessageContent):
-            # Process in background task so webhook responds 200 OK immediately to LINE
-            background_tasks.add_task(process_message_event, event)
+            # Await processing directly within request lifecycle so Render keeps CPU allocated (prevents Free Tier CPU Freeze)
+            await process_message_event(event)
 
     return JSONResponse(content={"status": "OK"})

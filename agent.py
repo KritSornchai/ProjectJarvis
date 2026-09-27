@@ -11,24 +11,18 @@ from google.genai import types
 
 logger = logging.getLogger(__name__)
 
-# Search trigger keywords (Thai and English)
-SEARCH_KEYWORDS = [
-    # Thai keywords
-    "ค้น", "เสิร์ช", "หา", "ข่าว", "วันนี้", "ล่าสุด", "สภาพอากาศ", "ราคาน้ำมัน", "สถานการณ์",
-    "จริงไหม", "ทำไม", "เช็ค", "ตรวจสอบ", "คืออะไร", "เมื่อไหร่", "อัปเดต", "ซิงค์", "ยกเลิก",
-    # English keywords
-    "search", "google", "find", "news", "today", "latest", "weather", "update", "current",
-    "why", "what", "is it true", "confirm", "when", "how", "sync", "ending", "discontinue",
-    "tell me", "check", "information", "happened"
+# Focused search trigger patterns (prevents over-triggering on casual conversation)
+SEARCH_PATTERNS = [
+    re.compile(r"(?i)\b(search|lookup|google for|latest news|breaking news|weather today|oil price|gold price)\b"),
+    re.compile(r"(ค้นหา|ค้นข้อมูล|เสิร์ช|ช่วยค้น|หาข้อมูล|เช็คข่าว|ข่าวล่าสุด|ข่าวน้ำท่วม|สภาพอากาศ|พยากรณ์อากาศ|ราคาน้ำมัน|ราคาทอง|ตารางสอบ|กำหนดการสอบ)")
 ]
 
 def needs_search(text: str) -> bool:
-    """Check if the user message requires real-time search grounding"""
-    lower = text.lower()
-    return any(k in lower for k in SEARCH_KEYWORDS)
+    """Check if the user message specifically requests external live data/search"""
+    return any(p.search(text) for p in SEARCH_PATTERNS)
 
 def perform_web_search(query: str, max_results: int = 5) -> str:
-    """Lightweight, 100% free web search using DuckDuckGo HTML without external dependencies"""
+    """Lightweight, 100% free web search with strict 2.0s timeout to prevent delays"""
     try:
         clean_q = re.sub(r"@?(jarvis|จาร์วิส)[:,\s]*", "", query, flags=re.IGNORECASE).strip()
         encoded = urllib.parse.quote_plus(clean_q)
@@ -37,15 +31,15 @@ def perform_web_search(query: str, max_results: int = 5) -> str:
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=5) as resp:
+        with urllib.request.urlopen(req, timeout=2.0) as resp:
             html = resp.read().decode("utf-8", errors="ignore")
-        snippets = re.findall(r'<a class=\"result__snippet[^\"]*\"[^>]*>(.*?)</a>', html, re.DOTALL)
+        snippets = re.findall(r'<a class="result__snippet[^"]*"[^>]*>(.*?)</a>', html, re.DOTALL)
         results = [unescape(re.sub(r'<.*?>', '', s)).strip() for s in snippets[:max_results]]
         valid_results = [r for r in results if len(r) > 15]
         if valid_results:
             return "\n".join(f"- {r}" for r in valid_results)
     except Exception as e:
-        logger.warning(f"Web search failed: {e}")
+        logger.info(f"Web search skipped/timed out: {e}. Falling back to internal Gemini intelligence.")
     return ""
 
 def get_system_instruction() -> str:
@@ -57,6 +51,11 @@ def get_system_instruction() -> str:
 
     return f"""คุณคือ Jarvis (จาร์วิส) AI ผู้ช่วยส่วนตัวอัจฉริยะของผู้ใช้
 วันเวลาปัจจุบันในประเทศไทยคือ: {date_str}
+
+
+ความถูกต้องของข้อมูลและการป้องกันข้อมูลเท็จ (Anti-Hallucination):
+- หากเป็นข้อมูลเฉพาะเจาะจง เช่น วันที่สอบ ตารางสอบ ประกาศทางการ หรือตัวเลขสถิติ หากไม่มีข้อมูลยืนยันแน่ชัด ห้ามคาดเดาหรือสร้างตัวเลข/วันที่ขึ้นมาเองอย่างเด็ดขาด
+- ให้แจ้งตามตรงอย่างสุภาพว่ายังไม่พบข้อมูลที่ยืนยันอย่างเป็นทางการ และแนะนำแหล่งข้อมูลทางการที่น่าเชื่อถือ (เช่น เว็บไซต์ศูนย์ทดสอบ atc.chula.ac.th สำหรับ CU-TEP)
 
 บทบาทและลักษณะนิสัย:
 - สุภาพ ฉลาด คล่องแคล่ว เป็นมิตร และพร้อมช่วยเหลือในทุกเรื่อง
