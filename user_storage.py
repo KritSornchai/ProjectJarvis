@@ -422,7 +422,7 @@ class UserStorageManager:
             return msg
 
         # 2. View profile
-        if clean_text.lower() in ["โปรไฟล์ของผม", "ดูโปรไฟล์", "ข้อมูลของผม", "my profile", "เช็คโปรไฟล์"]:
+        if any(k in clean_text.lower() for k in ["โปรไฟล์", "profile", "ข้อมูลของผม"]):
             data = self.get_or_create_user(user_id)
             prof = data.get("profile", {})
             name = prof.get("preferred_name", data.get("display_name", "ไม่ระบุ"))
